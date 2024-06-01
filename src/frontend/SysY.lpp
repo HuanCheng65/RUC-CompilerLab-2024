@@ -1,0 +1,126 @@
+%option reentrant noyywrap nounput
+
+%{
+#include <iostream>
+#include <cstring>
+#include <string>
+
+#define YY_DECL yy::Parser::symbol_type yylex(yyscan_t yyscanner, yy::location& loc)
+#define YY_USER_ACTION loc.columns(yyleng);
+#define yyterminate() return yy::Parser::make_END(loc)
+
+#include "parser.hpp"
+%}
+
+DIGIT [0-9]
+NONZERO_DIGIT [1-9]
+
+IDENTIFIER_NONDIGIT {LETTER}|_
+IDENTIFIER {IDENTIFIER_NONDIGIT}({IDENTIFIER_NONDIGIT}|{DIGIT})*
+
+DEC_CONSTANT {NONZERO_DIGIT}{DIGIT}*
+
+OCTAL_DIGIT [0-7]
+OCTAL_CONSTANT 0{OCTAL_DIGIT}*
+
+STRING_LITERAL \"([^\\\"]|\\.)*\"
+
+HEX_PREFIX 0x|0X
+HEX_DIGIT [0-9a-fA-F]
+HEX_CONSTANT {HEX_PREFIX}{HEX_DIGIT}+
+
+LETTER [a-zA-Z]
+
+MULTILINE_COMMENT "/*"([^*]|[*]+[^*/])*"*"*"*/"
+SINGLELINE_COMMENT "//".*
+
+PREPROCESSOR_LINE "#".*
+
+%%
+
+%{
+	loc.step();
+%}
+
+{MULTILINE_COMMENT}|{SINGLELINE_COMMENT} { /* ignore comments */ }
+
+{PREPROCESSOR_LINE} { /* ignore preprocessor line */ }
+
+"int" { return yy::Parser::make_K_INT(loc); }
+"void" { return yy::Parser::make_K_VOID(loc); }
+"if" { return yy::Parser::make_K_IF(loc); }
+"else" { return yy::Parser::make_K_ELSE(loc); }
+"while" { return yy::Parser::make_K_WHILE(loc); }
+"break" { return yy::Parser::make_K_BREAK(loc); }
+"continue" { return yy::Parser::make_K_CONTINUE(loc); }
+"return" { return yy::Parser::make_K_RETURN(loc); }
+"const" { return yy::Parser::make_K_CONST(loc); }
+
+{IDENTIFIER} {
+    return yy::Parser::make_IDENTIFIER(yytext, loc);
+}
+
+{HEX_CONSTANT} {
+    return yy::Parser::make_C_INT(std::stoi(yytext, nullptr, 16), loc);
+}
+{OCTAL_CONSTANT} {
+    return yy::Parser::make_C_INT(std::stoi(yytext, nullptr, 8), loc);
+}
+{DEC_CONSTANT} {
+    return yy::Parser::make_C_INT(std::stoi(yytext), loc);
+}
+{STRING_LITERAL} {
+    auto str = std::string(yytext + 1, yyleng - 2);
+    // unescape
+    for (size_t i = 0; i < str.size(); i++) {
+        if (str[i] == '\\') {
+            switch (str[i + 1]) {
+                case 'n': str[i] = '\n'; break;
+                case 't': str[i] = '\t'; break;
+                case 'v': str[i] = '\v'; break;
+                case 'r': str[i] = '\r'; break;
+                case 'f': str[i] = '\f'; break;
+                case 'a': str[i] = '\a'; break;
+                case 'b': str[i] = '\b'; break;
+                case '\\': str[i] = '\\'; break;
+                case '\'': str[i] = '\''; break;
+                case '\"': str[i] = '\"'; break;
+                case '?': str[i] = '\?'; break;
+                case '0': str[i] = '\0'; break;
+                default: break;
+            }
+            str.erase(i + 1, 1);
+        }
+    }
+    return yy::Parser::make_C_STRING_LITERAL(str, loc);
+}
+
+"+" { return yy::Parser::make_O_PLUS(loc); }
+"-" { return yy::Parser::make_O_MINUS(loc); }
+"*" { return yy::Parser::make_O_MULTIPLY(loc); }
+"/" { return yy::Parser::make_O_DIVIDE(loc); }
+"%" { return yy::Parser::make_O_MOD(loc); }
+"!" { return yy::Parser::make_O_NOT(loc); }
+"&&" { return yy::Parser::make_O_AND(loc); }
+"||" { return yy::Parser::make_O_OR(loc); }
+"==" { return yy::Parser::make_O_EQUAL(loc); }
+"!=" { return yy::Parser::make_O_NOT_EQUAL(loc); }
+"<" { return yy::Parser::make_O_LESS(loc); }
+"<=" { return yy::Parser::make_O_LESS_EQUAL(loc); }
+">" { return yy::Parser::make_O_GREATER(loc); }
+">=" { return yy::Parser::make_O_GREATER_EQUAL(loc); }
+"=" { return yy::Parser::make_O_ASSIGN(loc); }
+"&" { return yy::Parser::make_O_ADDRESS(loc); }
+
+"," { return yy::Parser::make_D_COMMA(loc); }
+";" { return yy::Parser::make_D_SEMICOLON(loc); }
+"(" { return yy::Parser::make_D_LPAREN(loc); }
+")" { return yy::Parser::make_D_RPAREN(loc); }
+"{" { return yy::Parser::make_D_LBRACE(loc); }
+"}" { return yy::Parser::make_D_RBRACE(loc); }
+"[" { return yy::Parser::make_D_LBRACKET(loc); }
+"]" { return yy::Parser::make_D_RBRACKET(loc); }
+
+[ \n\r\t\v] {}
+. {std::cerr << loc << ": " << "token error: unexpected character: " << yytext << std::endl; exit(1);}
+%%

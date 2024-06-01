@@ -1,0 +1,737 @@
+%require "3.0.4"
+%skeleton "lalr1.cc"
+%defines
+%locations
+%define api.token.constructor
+%define api.prefix {yy}
+%define api.parser.class {Parser}
+%define api.value.type variant
+
+%define parse.trace
+%define parse.error verbose
+
+%code requires {
+#include <cstring>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <memory>
+#include <functional>
+#include "parser_ctx.hpp"
+#include "AST.hpp"
+
+using std::cout;
+using std::cerr;
+using std::endl;
+using std::ios;
+using std::ofstream;
+
+using std::string_view;
+using std::string;
+using std::shared_ptr;
+using std::dynamic_pointer_cast;
+}
+
+%code
+{
+yy::Parser::symbol_type yylex(void* yyscanner, yy::location& loc);
+}
+
+%token END 0;
+
+%token K_INT K_VOID K_IF K_ELSE K_WHILE K_BREAK K_CONTINUE K_RETURN K_CONST
+%token O_PLUS O_MINUS O_MULTIPLY O_DIVIDE O_MOD O_NOT O_AND O_OR O_EQUAL O_NOT_EQUAL O_LESS O_LESS_EQUAL O_GREATER O_GREATER_EQUAL O_ASSIGN O_ADDRESS
+%token D_COMMA D_SEMICOLON D_LPAREN D_RPAREN D_LBRACE D_RBRACE D_LBRACKET D_RBRACKET
+%token <std::string> IDENTIFIER C_STRING_LITERAL
+%token <int> C_INT
+
+%type <BaseASTPtr> CompUnit Decl ConstDecl ConstDefList ConstDef ConstArray Array ConstInit ConstInitList VarDecl VarDefList VarDef InitVal InitList FuncDef FuncFParams FuncFParam Block BlockItemList BlockItem Stmt Exp Cond LVal PrimaryExp UnaryExp FuncRParams MulExp AddExp RelExp EqExp LAndExp LOrExp ConstExp
+%type <int> IntConst Number
+%type <Op> UnaryOp AddOp MulOp RelOp EqOp
+
+%nonassoc NOELSE
+%nonassoc K_ELSE
+
+%lex-param {void *scanner} {yy::location& loc}
+%parse-param {void *scanner} {yy::location& loc} { class Elite::ParserCtx& ctx } { shared_ptr<CompUnitAST>* result }
+
+%%
+
+%start CompUnit;
+
+CompUnit: FuncDef
+    {
+        auto comp_unit = CompUnitAST::create();
+        comp_unit->addFuncDef(std::dynamic_pointer_cast<FuncDefAST>($1));
+        $$ = comp_unit;
+        *result = comp_unit;
+    }
+    | CompUnit FuncDef
+    {
+        auto comp_unit = std::dynamic_pointer_cast<CompUnitAST>($1);
+        comp_unit->addFuncDef(std::dynamic_pointer_cast<FuncDefAST>($2));
+        $$ = comp_unit;
+    }
+    | Decl
+    {
+        auto comp_unit = CompUnitAST::create();
+        comp_unit->addDecl(std::dynamic_pointer_cast<DeclAST>($1));
+        $$ = comp_unit;
+        *result = comp_unit;
+    }
+    | CompUnit Decl
+    {
+        auto comp_unit = std::dynamic_pointer_cast<CompUnitAST>($1);
+        comp_unit->addDecl(std::dynamic_pointer_cast<DeclAST>($2));
+        $$ = comp_unit;
+    };
+
+Decl: ConstDecl
+    {
+        $$ = $1;
+    }
+    | VarDecl
+    {
+        $$ = $1;
+    };
+
+ConstDecl: K_CONST K_INT ConstDefList D_SEMICOLON
+    {
+        auto const_decl = std::dynamic_pointer_cast<ConstDeclAST>($3);
+        const_decl->btype = Btype::Int;
+        $$ = const_decl;
+    };
+
+ConstDefList: ConstDef
+    {
+        auto const_decl = ConstDeclAST::create();
+        const_decl->addConstDef(std::dynamic_pointer_cast<ConstDefAST>($1));
+        $$ = const_decl;
+    }
+    | ConstDefList D_COMMA ConstDef
+    {
+        auto const_decl = std::dynamic_pointer_cast<ConstDeclAST>($1);
+        const_decl->addConstDef(std::dynamic_pointer_cast<ConstDefAST>($3));
+        $$ = const_decl;
+    }
+    | error
+    {
+    };
+
+ConstDef: IDENTIFIER O_ASSIGN ConstInit
+    {
+        auto const_init = std::dynamic_pointer_cast<ConstInitAST>($3);
+        auto const_def = ConstDefAST::create($1, const_init);
+        $$ = const_def;
+    }
+    | IDENTIFIER ConstArray O_ASSIGN ConstInit
+    {
+        auto const_array = std::dynamic_pointer_cast<ConstArrayAST>($2);
+        auto const_init = std::dynamic_pointer_cast<ConstInitAST>($4);
+        auto const_def = ConstDefAST::create($1, const_array->constExps, const_init);
+        $$ = const_def;
+    }
+    | error
+    {
+    };
+
+ConstArray: D_LBRACKET ConstExp D_RBRACKET
+    {
+        auto const_array = ConstArrayAST::create();
+        auto const_exp = std::dynamic_pointer_cast<ConstExpAST>($2);
+        const_array->addConstExp(const_exp);
+        $$ = const_array;
+    } 
+    | ConstArray D_LBRACKET ConstExp D_RBRACKET
+    {
+        auto const_array = std::dynamic_pointer_cast<ConstArrayAST>($1);
+        auto const_exp = std::dynamic_pointer_cast<ConstExpAST>($3);
+        const_array->addConstExp(const_exp);
+        $$ = const_array;
+    };
+
+Array: D_LBRACKET Exp D_RBRACKET
+    {
+        auto array = ArrayAST::create();
+        array->addExp(std::dynamic_pointer_cast<ExpAST>($2));
+        $$ = array;
+    } 
+    | Array D_LBRACKET Exp D_RBRACKET
+    {
+        auto array = std::dynamic_pointer_cast<ArrayAST>($1);
+        array->addExp(std::dynamic_pointer_cast<ExpAST>($3));
+        $$ = array;
+    };
+
+ConstInit: ConstExp
+    {
+        auto const_exp = std::dynamic_pointer_cast<ConstExpAST>($1);
+        auto const_init_val = ConstInitValAST::create(const_exp);
+        $$ = const_init_val;
+    }
+    | D_LBRACE D_RBRACE
+    {
+        auto const_init_list = ConstInitListAST::create();
+        $$ = const_init_list;
+    }
+    | D_LBRACE ConstInitList D_RBRACE
+    {
+        $$ = $2;
+    }
+    | error
+    {
+    };
+
+ConstInitList: ConstInit
+    {
+        auto const_init_list = ConstInitListAST::create();
+        const_init_list->addConstInit(std::dynamic_pointer_cast<ConstInitAST>($1));
+        $$ = const_init_list;
+    }
+    | ConstInitList D_COMMA ConstInit
+    {
+        auto const_init_list = std::dynamic_pointer_cast<ConstInitListAST>($1);
+        const_init_list->addConstInit(std::dynamic_pointer_cast<ConstInitAST>($3));
+        $$ = const_init_list;
+    };
+
+VarDecl: K_INT VarDefList D_SEMICOLON
+    {
+        auto var_decl = std::dynamic_pointer_cast<VarDeclAST>($2);
+        var_decl->btype = Btype::Int;
+        $$ = var_decl;
+    };
+
+VarDefList: VarDef
+    {
+        auto var_decl = VarDeclAST::create();
+        var_decl->addVarDef(std::dynamic_pointer_cast<VarDefAST>($1));
+        $$ = var_decl;
+    }
+    | VarDefList D_COMMA VarDef
+    {
+        auto var_decl = std::dynamic_pointer_cast<VarDeclAST>($1);
+        var_decl->addVarDef(std::dynamic_pointer_cast<VarDefAST>($3));
+        $$ = var_decl;
+    }
+    | error
+    {
+    };
+
+VarDef: IDENTIFIER
+    {
+        auto var_def = VarDefAST::create($1);
+        $$ = var_def;
+    }
+    | IDENTIFIER ConstArray
+    {
+        auto const_array = std::dynamic_pointer_cast<ConstArrayAST>($2);
+        auto var_def = VarDefAST::create($1, const_array->constExps);
+        $$ = var_def;
+    }
+    | IDENTIFIER O_ASSIGN InitVal
+    {
+        auto init = std::dynamic_pointer_cast<InitAST>($3);
+        auto var_def = VarDefAST::create($1, init);
+        $$ = var_def;
+    }
+    | IDENTIFIER ConstArray O_ASSIGN InitVal
+    {
+        auto const_array = std::dynamic_pointer_cast<ConstArrayAST>($2);
+        auto init = std::dynamic_pointer_cast<InitAST>($4);
+        auto var_def = VarDefAST::create($1, const_array->constExps, init);
+        $$ = var_def;
+    }
+    | error
+    {
+    };
+
+InitVal: Exp
+    {
+        auto exp = std::dynamic_pointer_cast<ExpAST>($1);
+        auto init_val = InitValAST::create(exp);
+        $$ = init_val;
+    }
+    | D_LBRACE D_RBRACE
+    {
+        auto init_list = InitListAST::create();
+        $$ = init_list;
+    }
+    | D_LBRACE InitList D_RBRACE
+    {
+        $$ = $2;
+    }
+    | error
+    {
+    };
+
+InitList: InitVal
+    {
+        auto init_list = InitListAST::create();
+        init_list->addInit(std::dynamic_pointer_cast<InitAST>($1));
+        $$ = init_list;
+    }
+    | InitList D_COMMA InitVal
+    {
+        auto init_list = std::dynamic_pointer_cast<InitListAST>($1);
+        init_list->addInit(std::dynamic_pointer_cast<InitAST>($3));
+        $$ = init_list;
+    };
+
+FuncDef: K_INT IDENTIFIER D_LPAREN FuncFParams D_RPAREN Block
+    {
+        auto func_def = FuncDefAST::create(Btype::Int, $2);
+        func_def->funcFParams = std::dynamic_pointer_cast<FuncFParamsAST>($4);
+        func_def->block = std::dynamic_pointer_cast<BlockAST>($6);
+        $$ = func_def;
+    }
+    | K_INT IDENTIFIER D_LPAREN D_RPAREN Block
+    {
+        auto func_def = FuncDefAST::create(Btype::Int, $2);
+        func_def->funcFParams = FuncFParamsAST::create();
+        func_def->block = std::dynamic_pointer_cast<BlockAST>($5);
+        $$ = func_def;
+    }
+    | K_VOID IDENTIFIER D_LPAREN FuncFParams D_RPAREN Block
+    {
+        auto func_def = FuncDefAST::create(Btype::Void, $2);
+        func_def->funcFParams = std::dynamic_pointer_cast<FuncFParamsAST>($4);
+        func_def->block = std::dynamic_pointer_cast<BlockAST>($6);
+        $$ = func_def;
+    }
+    | K_VOID IDENTIFIER D_LPAREN D_RPAREN Block
+    {
+        auto func_def = FuncDefAST::create(Btype::Void, $2);
+        func_def->funcFParams = FuncFParamsAST::create();
+        func_def->block = std::dynamic_pointer_cast<BlockAST>($5);
+        $$ = func_def;
+    };
+
+FuncFParams: FuncFParam
+    {
+        auto func_f_params = FuncFParamsAST::create();
+        func_f_params->addFuncFParam(std::dynamic_pointer_cast<FuncFParamAST>($1));
+        $$ = func_f_params;
+    }
+    | FuncFParams D_COMMA FuncFParam
+    {
+        auto func_f_params = std::dynamic_pointer_cast<FuncFParamsAST>($1);
+        func_f_params->addFuncFParam(std::dynamic_pointer_cast<FuncFParamAST>($3));
+        $$ = func_f_params;
+    };
+
+FuncFParam: K_INT IDENTIFIER
+    {
+        auto func_f_param = VarFuncFParamAST::create(Btype::Int, $2);
+        $$ = func_f_param;
+    }
+    | K_INT IDENTIFIER D_LBRACKET D_RBRACKET
+    {
+        auto func_f_param = ArrayFuncFParamAST::create(Btype::Int, $2);
+        $$ = func_f_param;
+    }
+    | K_INT IDENTIFIER D_LBRACKET D_RBRACKET Array
+    {
+        auto array = std::dynamic_pointer_cast<ArrayAST>($5);
+        auto func_f_param = ArrayFuncFParamAST::create(Btype::Int, $2, array->exps);
+        $$ = func_f_param;
+    }
+    | K_INT IDENTIFIER D_LBRACKET error D_RBRACKET
+    {
+    }
+    | K_INT IDENTIFIER D_LBRACKET error D_RBRACKET Array
+    {
+    };
+
+Block: D_LBRACE D_RBRACE
+    {
+        auto block = BlockAST::create();
+        $$ = block;
+    }
+    | D_LBRACE BlockItemList D_RBRACE
+    {
+        auto block = std::dynamic_pointer_cast<BlockAST>($2);
+        $$ = block;
+    };
+
+BlockItemList: BlockItem
+    {
+        auto block = BlockAST::create();
+        block->addBlockItem(std::dynamic_pointer_cast<BlockItemAST>($1));
+        $$ = block;
+    }
+    | BlockItemList BlockItem
+    {
+        auto block = std::dynamic_pointer_cast<BlockAST>($1);
+        block->addBlockItem(std::dynamic_pointer_cast<BlockItemAST>($2));
+        $$ = block;
+    };
+
+BlockItem: Decl
+    {
+        auto decl = std::dynamic_pointer_cast<DeclAST>($1);
+        auto block_item = DeclBlockItemAST::create(decl);
+        $$ = block_item;
+    }
+    | Stmt
+    {
+        auto stmt = std::dynamic_pointer_cast<StmtAST>($1);
+        auto block_item = StmtBlockItemAST::create(stmt);
+        $$ = block_item;
+    };
+
+Stmt: LVal O_ASSIGN Exp D_SEMICOLON
+    {
+        auto lval = std::dynamic_pointer_cast<LValAST>($1);
+        auto exp = std::dynamic_pointer_cast<ExpAST>($3);
+        auto stmt = AssignStmtAST::create(lval, exp);
+        $$ = stmt;
+    }
+    | D_SEMICOLON
+    {
+        auto stmt = EmptyStmtAST::create();
+        $$ = stmt;
+    }
+    | Exp D_SEMICOLON
+    {
+        auto exp = std::dynamic_pointer_cast<ExpAST>($1);
+        auto stmt = ExpStmtAST::create(exp);
+        $$ = stmt;
+    }
+    | Block
+    {
+        auto block = std::dynamic_pointer_cast<BlockAST>($1);
+        auto stmt = BlockStmtAST::create(block);
+        $$ = stmt;
+    }
+    | K_IF D_LPAREN Cond D_RPAREN Stmt %prec NOELSE
+    {
+        auto cond = std::dynamic_pointer_cast<CondAST>($3);
+        auto stmt = std::dynamic_pointer_cast<StmtAST>($5);
+        auto if_stmt = IfStmtAST::create(cond, stmt);
+        $$ = if_stmt;
+    }
+    | K_IF D_LPAREN Cond D_RPAREN Stmt K_ELSE Stmt
+    {
+        auto cond = std::dynamic_pointer_cast<CondAST>($3);
+        auto stmt1 = std::dynamic_pointer_cast<StmtAST>($5);
+        auto stmt2 = std::dynamic_pointer_cast<StmtAST>($7);
+        auto if_stmt = IfStmtAST::create(cond, stmt1, stmt2);
+        $$ = if_stmt;
+    }
+    | K_WHILE D_LPAREN Cond D_RPAREN Stmt
+    {
+        auto cond = std::dynamic_pointer_cast<CondAST>($3);
+        auto stmt = std::dynamic_pointer_cast<StmtAST>($5);
+        auto while_stmt = WhileStmtAST::create(cond, stmt);
+        $$ = while_stmt;
+    }
+    | K_BREAK D_SEMICOLON
+    {
+        auto stmt = BreakStmtAST::create();
+        $$ = stmt;
+    }
+    | K_CONTINUE D_SEMICOLON
+    {
+        auto stmt = ContinueStmtAST::create();
+        $$ = stmt;
+    }
+    | K_RETURN D_SEMICOLON
+    {
+        auto stmt = ReturnStmtAST::create();
+        $$ = stmt;
+    }
+    | K_RETURN Exp D_SEMICOLON
+    {
+        auto exp = std::dynamic_pointer_cast<ExpAST>($2);
+        auto stmt = ReturnStmtAST::create(exp);
+        $$ = stmt;
+    };
+
+Exp: AddExp
+    {
+        auto exp = ExpAST::create(std::dynamic_pointer_cast<AddExpAST>($1));
+        $$ = exp;
+    };
+
+Cond: LOrExp
+    {
+        auto cond = CondAST::create(std::dynamic_pointer_cast<LOrExpAST>($1));
+        $$ = cond;
+    };
+
+LVal: IDENTIFIER
+    {
+        auto lval = LValAST::create($1);
+        $$ = lval;
+    }
+    | LVal D_LBRACKET Exp D_RBRACKET
+    {
+        auto lval = std::dynamic_pointer_cast<LValAST>($1);
+        lval->addExp(std::dynamic_pointer_cast<ExpAST>($3));
+        $$ = lval;
+    }
+    | error
+    {
+    };
+
+PrimaryExp: D_LPAREN Exp D_RPAREN
+    {
+        auto exp = std::dynamic_pointer_cast<ExpAST>($2);
+        auto primary_exp = PrimaryExpAST::create(exp);
+        $$ = primary_exp;
+    }
+    | LVal
+    {
+        auto lval = std::dynamic_pointer_cast<LValAST>($1);
+        auto primary_exp = LValPrimaryExpAST::create(lval);
+        $$ = primary_exp;
+    }
+    | Number
+    {
+        auto number = (int) $1;
+        auto primary_exp = NumberPrimaryExpAST::create(number);
+        $$ = primary_exp;
+    };
+
+Number: IntConst
+    {
+        $$ = $1;
+    };
+
+UnaryExp: PrimaryExp
+    {
+        auto primary_exp = std::dynamic_pointer_cast<BasePrimaryExpAST>($1);
+        auto unary_exp = PrimaryUnaryExpAST::create(primary_exp);
+        $$ = unary_exp;
+    }
+    | IDENTIFIER D_LPAREN D_RPAREN
+    {
+        auto func_r_params = FuncRParamsAST::create();
+        auto unary_exp = FuncCallUnaryExpAST::create($1, func_r_params);
+        $$ = unary_exp;
+    }
+    | IDENTIFIER D_LPAREN FuncRParams D_RPAREN
+    {
+        auto func_r_params = std::dynamic_pointer_cast<FuncRParamsAST>($3);
+        auto unary_exp = FuncCallUnaryExpAST::create($1, func_r_params);
+        $$ = unary_exp;
+    }
+    | UnaryOp UnaryExp
+    {
+        auto unary_exp = std::dynamic_pointer_cast<BaseUnaryExpAST>($2);
+        auto unary_op = $1;
+        auto unary_exp_node = UnaryExpAST::create(unary_op, unary_exp);
+        $$ = unary_exp_node;
+    };
+
+UnaryOp: O_PLUS
+    {
+        $$ = Op::Pos;
+    }
+    | O_MINUS
+    {
+        $$ = Op::Neg;
+    }
+    | O_NOT
+    {
+        $$ = Op::Not;
+    };
+
+FuncRParams: Exp
+    {
+        auto func_r_params = FuncRParamsAST::create();
+        func_r_params->addFuncRParam(ExpFuncRParamAST::create(std::dynamic_pointer_cast<ExpAST>($1)));
+        $$ = func_r_params;
+    }
+    | FuncRParams D_COMMA Exp
+    {
+        auto func_r_params = std::dynamic_pointer_cast<FuncRParamsAST>($1);
+        func_r_params->addFuncRParam(ExpFuncRParamAST::create(std::dynamic_pointer_cast<ExpAST>($3)));
+        $$ = func_r_params;
+    }
+    | C_STRING_LITERAL
+    {
+        auto func_r_params = FuncRParamsAST::create();
+        auto string_literal = StringLiteralFuncRParamAST::create($1);
+        func_r_params->addFuncRParam(string_literal);
+        $$ = func_r_params;
+    }
+    | FuncRParams D_COMMA C_STRING_LITERAL
+    {
+        auto func_r_params = std::dynamic_pointer_cast<FuncRParamsAST>($1);
+        auto string_literal = StringLiteralFuncRParamAST::create($3);
+        func_r_params->addFuncRParam(string_literal);
+        $$ = func_r_params;
+    }
+    | O_ADDRESS LVal
+    {
+        auto func_r_params = FuncRParamsAST::create();
+        auto lval = std::dynamic_pointer_cast<LValAST>($2);
+        auto address = AddressFuncRParamAST::create(lval);
+        func_r_params->addFuncRParam(address);
+        $$ = func_r_params;
+    }
+    | FuncRParams D_COMMA O_ADDRESS LVal
+    {
+        auto func_r_params = std::dynamic_pointer_cast<FuncRParamsAST>($1);
+        auto lval = std::dynamic_pointer_cast<LValAST>($4);
+        auto address = AddressFuncRParamAST::create(lval);
+        func_r_params->addFuncRParam(address);
+        $$ = func_r_params;
+    };
+
+MulExp: UnaryExp
+    {
+        auto unary_exp = std::dynamic_pointer_cast<BaseUnaryExpAST>($1);
+        auto mul_exp = MulExpAST::create(unary_exp);
+        $$ = mul_exp;
+    }
+    | MulExp MulOp UnaryExp
+    {
+        auto mul_exp = std::dynamic_pointer_cast<MulExpAST>($1);
+        auto unary_exp = std::dynamic_pointer_cast<BaseUnaryExpAST>($3);
+        auto mul_op = $2;
+        auto new_mul_exp = MulExpAST::create(mul_exp, mul_op, unary_exp);
+        $$ = new_mul_exp;
+    };
+
+AddExp: MulExp
+    {
+        auto mul_exp = std::dynamic_pointer_cast<MulExpAST>($1);
+        auto add_exp = AddExpAST::create(mul_exp);
+        $$ = add_exp;
+    }
+    | AddExp AddOp MulExp
+    {
+        auto add_exp = std::dynamic_pointer_cast<AddExpAST>($1);
+        auto mul_exp = std::dynamic_pointer_cast<MulExpAST>($3);
+        auto add_op = $2;
+        auto new_add_exp = AddExpAST::create(add_exp, add_op, mul_exp);
+        $$ = new_add_exp;
+    };
+
+RelExp: AddExp
+    {
+        auto add_exp = std::dynamic_pointer_cast<AddExpAST>($1);
+        auto rel_exp = RelExpAST::create(add_exp);
+        $$ = rel_exp;
+    }
+    | RelExp RelOp AddExp
+    {
+        auto rel_exp = std::dynamic_pointer_cast<RelExpAST>($1);
+        auto add_exp = std::dynamic_pointer_cast<AddExpAST>($3);
+        auto new_rel_exp = RelExpAST::create(rel_exp, $2, add_exp);
+        $$ = new_rel_exp;
+    };
+
+EqExp: RelExp
+    {
+        auto eq_exp = EqExpAST::create(std::dynamic_pointer_cast<RelExpAST>($1));
+        $$ = eq_exp;
+    }
+    | EqExp EqOp RelExp
+    {
+        auto eq_exp = std::dynamic_pointer_cast<EqExpAST>($1);
+        auto eq_op = $2;
+        auto rel_exp = std::dynamic_pointer_cast<RelExpAST>($3);
+        auto new_eq_exp = EqExpAST::create(eq_exp, eq_op, rel_exp);
+        $$ = new_eq_exp;
+    };
+
+LAndExp: EqExp
+    {
+        auto l_and_exp = LAndExpAST::create();
+        l_and_exp->addEqExp(std::dynamic_pointer_cast<EqExpAST>($1));
+        $$ = l_and_exp;
+    }
+    | LAndExp O_AND EqExp
+    {
+        auto l_and_exp = std::dynamic_pointer_cast<LAndExpAST>($1);
+        auto eq_exp = std::dynamic_pointer_cast<EqExpAST>($3);
+        l_and_exp->addEqExp(eq_exp);
+        $$ = l_and_exp;
+    };
+
+LOrExp: LAndExp
+    {
+        auto l_or_exp = LOrExpAST::create();
+        l_or_exp->addLAndExp(std::dynamic_pointer_cast<LAndExpAST>($1));
+        $$ = l_or_exp;
+    }
+    | LOrExp O_OR LAndExp
+    {
+        auto l_or_exp = std::dynamic_pointer_cast<LOrExpAST>($1);
+        auto l_and_exp = std::dynamic_pointer_cast<LAndExpAST>($3);
+        l_or_exp->addLAndExp(l_and_exp);
+        $$ = l_or_exp;
+    };
+
+ConstExp: AddExp
+    {
+        auto const_exp = ConstExpAST::create(std::dynamic_pointer_cast<AddExpAST>($1));
+        $$ = const_exp;
+    }
+    | error
+    {
+    };
+
+IntConst: C_INT
+    {
+        $$ = $1;
+    };
+
+AddOp: O_PLUS
+    {
+        $$ = Op::Add;
+    }
+    | O_MINUS
+    {
+        $$ = Op::Sub;
+    };
+
+MulOp: O_MULTIPLY
+    {
+        $$ = Op::Mul;
+    }
+    | O_DIVIDE
+    {
+        $$ = Op::Div;
+    }
+    | O_MOD
+    {
+        $$ = Op::Mod;
+    };
+
+RelOp: O_LESS
+    {
+        $$ = Op::Lt;
+    }
+    | O_LESS_EQUAL
+    {
+        $$ = Op::Le;
+    }
+    | O_GREATER
+    {
+        $$ = Op::Gt;
+    }
+    | O_GREATER_EQUAL
+    {
+        $$ = Op::Ge;
+    };
+
+EqOp: O_EQUAL
+    {
+        $$ = Op::Eq;
+    }
+    | O_NOT_EQUAL
+    {
+        $$ = Op::Ne;
+    };
+%%
+
+void yy::Parser::error(const yy::location& l, const std::string& m)
+{
+	std::cerr << l << ": " << m << std::endl;
+}
