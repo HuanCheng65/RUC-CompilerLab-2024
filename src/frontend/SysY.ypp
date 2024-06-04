@@ -11,6 +11,8 @@
 %define parse.error verbose
 
 %code requires {
+#include "frontend/parser_ctx.hpp"
+#include "frontend/AST.hpp"
 #include <cstring>
 #include <cstdlib>
 #include <fstream>
@@ -18,8 +20,6 @@
 #include <string>
 #include <memory>
 #include <functional>
-#include "parser_ctx.hpp"
-#include "AST.hpp"
 
 using std::cout;
 using std::cerr;

@@ -2,6 +2,7 @@
 #include "frontend/ir_string.hpp"
 #include <deque>
 #include <fmt/core.h>
+#include <format>
 #include <memory>
 #include <range/v3/range/conversion.hpp>
 #include <range/v3/view/join.hpp>
@@ -9,6 +10,7 @@
 #include <stack>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 using std::deque;
@@ -344,4 +346,59 @@ inline void assert_not_null(shared_ptr<T> ptr, string_view message)
     if (!ptr) {
         throw std::runtime_error(string(message));
     }
+}
+
+namespace sysy {
+class NameManager {
+private:
+    std::unordered_map<string, int> identCount;
+    int tempCount = 0;
+
+    string genUniqueName(string_view ident)
+    {
+        auto it = identCount.find(ident.data());
+        if (it == identCount.end()) {
+            identCount[ident.data()] = 1;
+            return std::format("{}", ident);
+        }
+        return std::format("{}.{}", ident, it->second++);
+    }
+
+public:
+    void reset()
+    {
+        // nameCount.clear();
+        tempCount = 0;
+    }
+
+    string genTempName()
+    {
+        return std::format("%t{}", ++tempCount);
+    }
+
+    string genUniqueLocalName(string_view ident)
+    {
+        return std::format("%{}", genUniqueName(ident));
+    }
+
+    string genUniqueGlobalName(string_view ident)
+    {
+        return std::format("@{}", genUniqueName(ident));
+    }
+
+    string genLabelName(string_view labelIdent)
+    {
+        auto it = identCount.find(labelIdent.data());
+        if (it == identCount.end()) {
+            identCount[labelIdent.data()] = 1;
+            return std::format("{}", labelIdent);
+        }
+        return std::format("{}.{}", labelIdent, it->second++);
+    }
+
+    string getLabelRef(string_view labelName)
+    {
+        return std::format("%{}", labelName);
+    }
+};
 }

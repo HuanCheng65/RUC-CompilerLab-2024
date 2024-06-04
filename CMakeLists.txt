@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # 编译选项
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -fPIC")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -fPIC -O3")
 
 # 查找Bison和Flex
 find_package(BISON REQUIRED)
@@ -44,8 +44,6 @@ ADD_FLEX_BISON_DEPENDENCY(Lexer Parser)
 # 包含生成的头文件目录
 include_directories(${CMAKE_BINARY_DIR})
 # 包含项目的头文件目录
-include_directories(${CMAKE_SOURCE_DIR}/src/frontend)
-include_directories(${CMAKE_SOURCE_DIR}/src/backend)
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")

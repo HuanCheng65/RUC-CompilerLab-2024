@@ -1,4 +1,6 @@
-#include "backend/asm_generator.hpp"
+#include "backend/instruction_generator.hpp"
+#include "backend/linear_scan.hpp"
+#include "backend/registers.hpp"
 #include "frontend/ir_generator.hpp"
 #include "parser.hpp"
 #include <CLI/CLI.hpp>
@@ -23,36 +25,32 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/TargetParser/Host.h>
+#include <print>
+#include <ranges>
 
-void printFunction(const llvm::Function &F)
+void printFunction(const llvm::Function& F)
 {
     llvm::outs() << "Function: " << F.getName() << "\n";
-    for (const auto &B : F)
-    {
+    for (const auto& B : F) {
         llvm::outs() << "  BasicBlock: " << B.getName() << "\n";
-        for (const auto &I : B)
-        {
+        for (const auto& I : B) {
             llvm::outs() << "    Instruction: " << I << "\n";
-            if (auto storeInst = llvm::dyn_cast<llvm::StoreInst>(&I))
-            {
+            if (auto storeInst = llvm::dyn_cast<llvm::StoreInst>(&I)) {
                 llvm::outs() << "      StoreInst: " << *storeInst->getPointerOperand() << " = "
                              << *storeInst->getValueOperand() << "\n";
-            }
-            else if (auto loadInst = llvm::dyn_cast<llvm::LoadInst>(&I))
-            {
-                llvm::outs() << "      LoadInst: " << *loadInst->getPointerOperand() << " = " << *loadInst << "\n";
-            }
-            else if (auto allocaInst = llvm::dyn_cast<llvm::AllocaInst>(&I))
-            {
+            } else if (auto loadInst = llvm::dyn_cast<llvm::LoadInst>(&I)) {
+                llvm::outs() << "      LoadInst: " << *loadInst->getPointerOperand() << " = "
+                             << *loadInst << "\n";
+            } else if (auto allocaInst = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
                 llvm::outs() << "      AllocaInst: " << allocaInst->getName() << "\n";
             }
         }
     }
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
-    CLI::App app{"SysY Compiler"};
+    CLI::App app { "SysY Compiler" };
 
     std::string inputFile;
     std::string outputName = "output";
@@ -69,8 +67,7 @@ int main(int argc, char *argv[])
     freopen(inputFile.c_str(), "r", stdin);
 
     Elite::ParserCtx ctx;
-    if (ctx.parser->parse())
-    {
+    if (ctx.parser->parse()) {
         std::cerr << "Parse failed" << std::endl;
         return 1;
     }
@@ -89,8 +86,7 @@ int main(int argc, char *argv[])
     irGenerator.generateIR(ast);
     auto result = irGenerator.getIR();
 
-    if (emitIR)
-    {
+    if (emitIR) {
         std::ofstream out(fmt::format("{}.ll", outputName));
         out << result;
         out.flush();
@@ -101,24 +97,59 @@ int main(int argc, char *argv[])
     llvm::SMDiagnostic err;
     auto module = llvm::parseIR(llvm::MemoryBufferRef(result, "input"), err, context);
 
-    if (!module)
-    {
+    if (!module) {
         err.print(argv[0], llvm::errs());
         return 1;
     }
 
-    if (!useLLVM)
-    {
-        sysy::AsmGenerator asmGenerator;
-        asmGenerator.generate(module);
-        auto myAsmResult = asmGenerator.getAsm();
-        std::ofstream asmOut(fmt::format("{}.s", outputName));
-        asmOut << myAsmResult;
-        asmOut.flush();
-    }
-    else
-    {
-        const char *args[] = {"sysy", "--x86-asm-syntax=intel"};
+    if (!useLLVM) {
+        sysy::InstructionGenerator instructionGenerator;
+        auto asmModule = instructionGenerator.generate(module);
+        std::println("Before optimization:");
+        for (const auto& func : asmModule->getFunctions()) {
+            for (const auto& block : func->getBlocks()) {
+                std::println("{}", block->dump());
+            }
+        }
+        sysy::LinearScanAllocator allocator;
+        for (const auto& func : asmModule->getFunctions()) {
+            allocator.allocate(func);
+            instructionGenerator.generateCallerSave(func);
+            allocator.doSpill(func);
+            auto calleeSaveRegs = allocator.getUsedRegisters()
+                | std::views::filter([](const auto& reg) {
+                      return std::find(sysy::CALLEE_SAVED_REGISTERS.begin(),
+                                 sysy::CALLEE_SAVED_REGISTERS.end(), reg)
+                          != sysy::CALLEE_SAVED_REGISTERS.end();
+                  })
+                | std::ranges::to<std::set>();
+            instructionGenerator.setCalleeSaveRegisters(func, calleeSaveRegs);
+        }
+        for (const auto& func : asmModule->getFunctions()) {
+            instructionGenerator.generatePrologue(func);
+            instructionGenerator.generateEpilogue(func);
+            instructionGenerator.updateRelativeStackLocation(func);
+            // print for dbg
+            std::println("Function: {}", func->getName());
+            func->traverse([&](const auto& block) {
+                std::println("  Block: {}", block->getName());
+                block->traverseInstructions([&](const auto& inst) {
+                    if (!inst->dump().empty()) {
+                        auto ss = std::stringstream {};
+                        for (const auto& op : inst->getOperands()) {
+                            ss << std::format("{}({})", op->getName(), op->dump(true)) << ", ";
+                        }
+                        std::println("    ({}), Operands: {}", inst->dump(), ss.str());
+                    }
+                });
+            });
+        }
+        auto asmStr = asmModule->dump();
+        std::ofstream out(fmt::format("{}.s", outputName));
+        out << asmStr;
+        out.flush();
+    } else {
+        const char* args[] = { "sysy", "--x86-asm-syntax=intel" };
         const auto res = llvm::cl::ParseCommandLineOptions(std::size(args), args);
         assert(res && "Failed to parse command line options");
 
@@ -132,8 +163,7 @@ int main(int argc, char *argv[])
 
         std::string error;
         auto target = llvm::TargetRegistry::lookupTarget(targetTriple, error);
-        if (!target)
-        {
+        if (!target) {
             llvm::errs() << "Error: " << error;
             return 1;
         }
@@ -150,17 +180,14 @@ int main(int argc, char *argv[])
         std::error_code ec;
         llvm::raw_fd_ostream dest(fmt::format("{}.s", outputName), ec, llvm::sys::fs::OF_None);
 
-        if (ec)
-        {
+        if (ec) {
             llvm::errs() << "Could not open file: " << ec.message();
             return 1;
         }
 
-        // targetMachine.setI
         llvm::legacy::PassManager pass;
         auto fileType = llvm::CodeGenFileType::AssemblyFile;
-        if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType))
-        {
+        if (targetMachine->addPassesToEmitFile(pass, dest, nullptr, fileType)) {
             llvm::errs() << "TargetMachine can't emit a file of this type";
             return 1;
         }

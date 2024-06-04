@@ -1,5 +1,6 @@
 #pragma once
 #include <fmt/format.h>
+#include <frontend/utils.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -8,59 +9,6 @@
 using std::shared_ptr, std::make_shared, std::enable_shared_from_this;
 using std::string;
 using std::string_view;
-
-class NameManager {
-private:
-    std::unordered_map<string, int> identCount;
-    int tempCount = 0;
-
-    string genUniqueName(string_view ident)
-    {
-        auto it = identCount.find(ident.data());
-        if (it == identCount.end()) {
-            identCount[ident.data()] = 1;
-            return fmt::format("{}", ident);
-        }
-        return fmt::format("{}.{}", ident, it->second++);
-    }
-
-public:
-    void reset()
-    {
-        // nameCount.clear();
-        tempCount = 0;
-    }
-
-    string genTempName()
-    {
-        return fmt::format("%t{}", ++tempCount);
-    }
-
-    string genUniqueLocalName(string_view ident)
-    {
-        return fmt::format("%{}", genUniqueName(ident));
-    }
-
-    string genUniqueGlobalName(string_view ident)
-    {
-        return fmt::format("@{}", genUniqueName(ident));
-    }
-
-    string genLabelName(string_view labelIdent)
-    {
-        auto it = identCount.find(labelIdent.data());
-        if (it == identCount.end()) {
-            identCount[labelIdent.data()] = 1;
-            return fmt::format("{}", labelIdent);
-        }
-        return fmt::format("{}.{}", labelIdent, it->second++);
-    }
-
-    string getLabelRef(string_view labelName)
-    {
-        return fmt::format("%{}", labelName);
-    }
-};
 
 enum class SymbolType {
     INT,
@@ -276,7 +224,7 @@ class SymbolTableManager : public enable_shared_from_this<SymbolTableManager> {
 private:
     shared_ptr<SymbolTable> global;
     shared_ptr<SymbolTable> current;
-    NameManager nameManager;
+    sysy::NameManager nameManager;
 
 public:
     SymbolTableManager()
