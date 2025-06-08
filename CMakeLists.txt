@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # 编译选项
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -fPIC -O3")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -g -fPIC -Og")
 
 # 查找Bison和Flex
 find_package(BISON REQUIRED)
@@ -138,16 +138,17 @@ foreach(TEST_FILE ${TEST_FILES})
         "    if(NOT EXECUTE_RESULT EQUAL 0)\n"
         "        file(APPEND ${TEST_DIR}/result.out \"\$\{EXECUTE_RESULT\}\")\n"
         "    endif()\n"
-        "    execute_process(COMMAND ${CMAKE_COMMAND} -E echo \"Test ${TEST_BASENAME} output:\")\n"
+        "    execute_process(COMMAND ${CMAKE_COMMAND} -E echo \"\nTest ${TEST_BASENAME} output:\")\n"
         "    execute_process(COMMAND ${CMAKE_COMMAND} -E cat ${TEST_DIR}/result.out)\n"
-        "    execute_process(COMMAND ${CMAKE_COMMAND} -E echo \"Expected output:\")\n"
+        "    execute_process(COMMAND ${CMAKE_COMMAND} -E echo \"\nExpected output:\")\n"
         "    execute_process(COMMAND ${CMAKE_COMMAND} -E cat ${TEST_DIR}/${TEST_BASENAME}.out)\n"
         "    execute_process(\n"
         "        COMMAND ${CMAKE_COMMAND} -E compare_files --ignore-eol ${TEST_DIR}/result.out ${TEST_DIR}/${TEST_BASENAME}.out\n"
         "        RESULT_VARIABLE COMPARE_RESULT\n"
         "    )\n"
+        "    execute_process(COMMAND ${CMAKE_COMMAND} -E echo \"\n\")\n"
         "    if(COMPARE_RESULT EQUAL 1)\n"
-        "        message(FATAL_ERROR \"Test ${TEST_BASENAME} failed\")\n"
+        "        message(FATAL_ERROR \"\nTest ${TEST_BASENAME} failed\")\n"
         "    endif()\n"
         "endif()\n"
         "file(REMOVE ${TEST_DIR}/out.s ${TEST_DIR}/out ${TEST_DIR}/result.out)\n"

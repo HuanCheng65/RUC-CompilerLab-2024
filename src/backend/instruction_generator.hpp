@@ -142,11 +142,16 @@ class InstructionGenerator {
                     -offset, StackLocationBase::RBP_RELATIVE);
             }
         } else if (auto global = llvm::dyn_cast<llvm::GlobalVariable>(val);
-                   global && global->hasName()) {
+            global && global->hasName()) {
             auto name = global->getName().str();
-            return std::make_shared<GlobalVariable>(name,
-                generateTypeInfoForGlobal(global->getValueType()), global->getInitializer(),
-                global->isConstant());
+            if (!global->getInitializer()->isZeroValue()) {
+                return std::make_shared<GlobalVariable>(name,
+                    generateTypeInfoForGlobal(global->getValueType()), global->getInitializer(),
+                    global->isConstant());
+            } else {
+                return std::make_shared<GlobalVariable>(
+                    name, generateTypeInfoForGlobal(global->getValueType()), global->isConstant());
+            }
         } else if (auto constant = llvm::dyn_cast<llvm::ConstantInt>(val)) {
             auto value = constant->getSExtValue();
             return std::make_shared<Immediate>(value, generateTypeInfo(constant->getType()));
@@ -267,11 +272,13 @@ class InstructionGenerator {
             }
             for (int i = 0; i < std::min(argNum, regArgNum); i++) {
                 auto arg = instArgs[i];
+                auto argType = arg->getType();
                 auto argOp = getOperand(arg);
                 auto name = nameManager.genUniqueName(std::format("call.arg.{}", i));
                 OperandPtr passOp = generatePrecoloredOperand(
-                    name, FUNCTION_PARAM_REGISTERS[i], generateTypeInfo(arg->getType()));
-                if (argOp->getType()->isArrayType() || argOp->getType()->isAllocatedType()) {
+                    name, FUNCTION_PARAM_REGISTERS[i], generateTypeInfo(argType));
+                if (argOp->getType()->isArrayType() || argOp->getType()->isAllocatedType()
+                    || (argType->isPointerTy() && !argOp->getType()->isPointerType())) {
                     args.push_back(passOp);
                     auto leaInst = std::make_shared<LeaInstruction>(passOp, argOp);
                     useOperand(argOp, leaInst);
@@ -316,7 +323,8 @@ class InstructionGenerator {
                 });
             }
             if (isExternal) {
-                std::println("calling c stdlib {}, clear rax; hasRetVal: {}", funcName, hasRetVal);
+                // std::println("calling c stdlib {}, clear rax; hasRetVal: {}", funcName,
+                // hasRetVal);
                 auto xorInst = std::make_shared<BinaryOpInstruction>(BinaryOpType::XOR, rax, rax);
                 // useOperand(rax, xorInst);
                 defOperand(rax, xorInst);

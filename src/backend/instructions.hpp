@@ -266,7 +266,7 @@ public:
 
     void replaceBy(OperandPtr other);
 
-    virtual void replaceOperand(OperandPtr oldOperand, OperandPtr newOperand) {};
+    virtual void replaceOperand(OperandPtr oldOperand, OperandPtr newOperand) { };
 
     virtual bool operator==(const Operand& other) const { return false; }
 };
@@ -606,6 +606,12 @@ struct GlobalVariable : Operand {
     {
     }
 
+    explicit GlobalVariable(string_view name, TypeInfoPtr type, bool isConst)
+        : Operand(OperandType::GLOBAL_VARIABLE, type, name)
+        , isConst(isConst)
+    {
+    }
+
     explicit GlobalVariable(
         string_view name, TypeInfoPtr type, const llvm::Constant* initializer, bool isConst)
         : Operand(OperandType::GLOBAL_VARIABLE, type, name)
@@ -619,7 +625,16 @@ struct GlobalVariable : Operand {
 
     auto dump(bool withType) const -> string override
     {
-        return std::format("[rip + {}]", getName());
+        auto typePrefix = ""s;
+        if (withType && !isConst) {
+            typePrefix = std::format("{} ",
+                getSize() == 1       ? "byte ptr"s
+                    : getSize() == 2 ? "word ptr"s
+                    : getSize() == 4 ? "dword ptr"s
+                    : getSize() == 8 ? "qword ptr"s
+                                     : ""s);
+        }
+        return typePrefix + std::format("[rip + {}]", getName());
     }
 
     auto hasInitializer() const -> bool { return initializer != nullptr; }

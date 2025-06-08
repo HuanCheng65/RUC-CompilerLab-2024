@@ -108,13 +108,13 @@ class LinearScanAllocator {
                 }
             });
         });
-        fmt::print("Liveness analysis done for function {}\n", func->getName());
-        for (const auto& [operand, range] : operandLiveRange) {
-            if (operand->isMemory() || operand->isImmediate())
-                continue;
-            fmt::print("  Operand: {}\n", operand->getName());
-            fmt::print("  Live range: [{}, {}]\n", range.start, range.end);
-        }
+        // fmt::print("Liveness analysis done for function {}\n", func->getName());
+        // for (const auto& [operand, range] : operandLiveRange) {
+        //     if (operand->isMemory() || operand->isImmediate())
+        //         continue;
+        //     fmt::print("  Operand: {}\n", operand->getName());
+        //     fmt::print("  Live range: [{}, {}]\n", range.start, range.end);
+        // }
     }
 
     set<Register> getAvailableRegisters() const
@@ -160,8 +160,9 @@ class LinearScanAllocator {
             auto [start, end, operand] = *active.begin();
             active.erase(active.begin());
             freeRegister(registers.at(operand));
-            std::println("Freeing register {} for {} at {}", getRegisterName(registers.at(operand)),
-                operand->getName(), end);
+            // std::println("Freeing register {} for {} at {}",
+            // getRegisterName(registers.at(operand)),
+            //     operand->getName(), end);
         }
     }
 
@@ -189,7 +190,7 @@ class LinearScanAllocator {
         //     return true;
         // }
         spillToMemory(operand);
-        std::println("Spilling {} at {}", operand->getName(), instLoc);
+        // std::println("Spilling {} at {}", operand->getName(), instLoc);
         return true;
     }
 
@@ -209,22 +210,22 @@ class LinearScanAllocator {
         }
         if (hasSpill && spill.end > current.end && canReallocateOrSpill(current.operand)) {
             allocateRegister(current.operand, registers.at(spill.operand));
-            std::println("Allocating {} to {} at {}", current.operand->getName(),
-                getRegisterName(registers.at(spill.operand)), current.start);
+            // std::println("Allocating {} to {} at {}", current.operand->getName(),
+            //     getRegisterName(registers.at(spill.operand)), current.start);
             spillToMemory(spill.operand);
-            std::println("Spilling {} at {}", spill.operand->getName(), current.start);
+            // std::println("Spilling {} at {}", spill.operand->getName(), current.start);
             active.erase(active.begin());
             active.insert(current);
         } else if (canReallocateOrSpill(current.operand)) {
             spillToMemory(current.operand);
-            std::println("Spilling {} at {}", current.operand->getName(), current.start);
+            // std::println("Spilling {} at {}", current.operand->getName(), current.start);
         } else {
             auto regOp = std::static_pointer_cast<PhysicalRegister>(current.operand);
             auto reg = regOp->getRegister();
             auto usingOp = operandUsingRegister.at(reg);
             allocateRegister(current.operand, reg);
-            std::println("Allocating {} to {} at {}", current.operand->getName(),
-                getRegisterName(reg), current.start);
+            // std::println("Allocating {} to {} at {}", current.operand->getName(),
+            //     getRegisterName(reg), current.start);
             if (!reallocateOrSpill(usingOp, current.start)) {
                 throw std::runtime_error(std::format("Cannot reallocate or spill {} for {} at {}",
                     usingOp->getName(), current.operand->getName(), current.start));
@@ -235,7 +236,7 @@ class LinearScanAllocator {
                 active.erase(it);
             } else if (auto it = std::find_if(liveRanges.begin(), liveRanges.end(),
                            [&](const auto& range) { return range.operand == usingOp; });
-                       it != liveRanges.end()) {
+                it != liveRanges.end()) {
                 liveRanges.erase(it);
             }
             active.insert(current);
@@ -344,16 +345,16 @@ public:
         for (const auto& range : liveRanges) {
             expireOldRanges(range.start);
 
-            if (range.operand->getName().starts_with("call.arg")) {
-                std::println("Argument {}", range.operand->getName());
-            }
+            // if (range.operand->getName().starts_with("call.arg")) {
+            //     std::println("Argument {}", range.operand->getName());
+            // }
 
             auto reg = preAllocateRegister(range.operand);
             if (reg == Register::INVALID) {
                 spillAt(range);
             } else {
-                std::println("Allocating {} to {} at {}", range.operand->getName(),
-                    getRegisterName(reg), range.start);
+                // std::println("Allocating {} to {} at {}", range.operand->getName(),
+                //     getRegisterName(reg), range.start);
                 allocateRegister(range.operand, reg);
                 active.insert(range);
             }
@@ -373,8 +374,8 @@ public:
     void doSpill(AsmFunctionPtr func)
     {
         for (const auto& [operand, loc] : locations) {
-            std::println("Operand: {}, StackLoc: {}, SaveRegLoc: {}", operand->getName(),
-                loc.spillSlot->dump(false), loc.saveRegSlot->dump(false));
+            // std::println("Operand: {}, StackLoc: {}, SaveRegLoc: {}", operand->getName(),
+            //     loc.spillSlot->dump(false), loc.saveRegSlot->dump(false));
             auto spillSlot = loc.spillSlot;
             auto saveRegSlot = loc.saveRegSlot;
             auto oldUses = operand->getUses()
@@ -403,9 +404,9 @@ public:
             auto useAtDefInsts = oldUseAtDefs
                 | std::views::transform([](const auto& def) { return std::get<0>(def); })
                 | std::ranges::to<set>();
-            if (!oldUseAtDefs.empty()) {
-                std::println("Operand {} has uses at defs", operand->getName());
-            }
+            // if (!oldUseAtDefs.empty()) {
+            //     std::println("Operand {} has uses at defs", operand->getName());
+            // }
             for (auto& oldUse : oldUses) {
                 auto& [inst, op, _, use] = oldUse;
                 if (std::dynamic_pointer_cast<FakeInstruction>(inst))
@@ -435,7 +436,7 @@ public:
                     continue;
 
                 if (useAtDefInsts.contains(inst)) {
-                    std::println("  Use at def: {}", inst->dump());
+                    // std::println("  Use at def: {}", inst->dump());
                     auto instLoc = instToId[inst];
                     auto saveRegTemp = createSpillTemp(instLoc, TypeInfo::createPrimitive(8));
                     auto loadAndStoreTemp = std::make_shared<PhysicalRegister>("spill.temp",
@@ -499,9 +500,9 @@ public:
 
     void assignRegisters(AsmFunctionPtr func)
     {
-        std::println("Assigning registers for function {}", func->getName());
+        // std::println("Assigning registers for function {}", func->getName());
         for (const auto& [operand, reg] : registers) {
-            std::println("Operand: {}, Register: {}", operand->getName(), getRegisterName(reg));
+            // std::println("Operand: {}, Register: {}", operand->getName(), getRegisterName(reg));
             auto physicalReg
                 = std::make_shared<PhysicalRegister>(operand->getName(), reg, operand->getType());
             operand->replaceBy(physicalReg);

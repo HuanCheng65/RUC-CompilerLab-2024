@@ -4,3 +4,5 @@ build
 
 *.log
 output.*
+
+vcpkg_installed

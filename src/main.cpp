@@ -105,12 +105,12 @@ int main(int argc, char* argv[])
     if (!useLLVM) {
         sysy::InstructionGenerator instructionGenerator;
         auto asmModule = instructionGenerator.generate(module);
-        std::println("Before optimization:");
-        for (const auto& func : asmModule->getFunctions()) {
-            for (const auto& block : func->getBlocks()) {
-                std::println("{}", block->dump());
-            }
-        }
+        // std::println("Before optimization:");
+        // for (const auto& func : asmModule->getFunctions()) {
+        //     for (const auto& block : func->getBlocks()) {
+        //         std::println("{}", block->dump());
+        //     }
+        // }
         sysy::LinearScanAllocator allocator;
         for (const auto& func : asmModule->getFunctions()) {
             allocator.allocate(func);
@@ -130,19 +130,19 @@ int main(int argc, char* argv[])
             instructionGenerator.generateEpilogue(func);
             instructionGenerator.updateRelativeStackLocation(func);
             // print for dbg
-            std::println("Function: {}", func->getName());
-            func->traverse([&](const auto& block) {
-                std::println("  Block: {}", block->getName());
-                block->traverseInstructions([&](const auto& inst) {
-                    if (!inst->dump().empty()) {
-                        auto ss = std::stringstream {};
-                        for (const auto& op : inst->getOperands()) {
-                            ss << std::format("{}({})", op->getName(), op->dump(true)) << ", ";
-                        }
-                        std::println("    ({}), Operands: {}", inst->dump(), ss.str());
-                    }
-                });
-            });
+            // std::println("Function: {}", func->getName());
+            // func->traverse([&](const auto& block) {
+            //     std::println("  Block: {}", block->getName());
+            //     block->traverseInstructions([&](const auto& inst) {
+            //         if (!inst->dump().empty()) {
+            //             auto ss = std::stringstream {};
+            //             for (const auto& op : inst->getOperands()) {
+            //                 ss << std::format("{}({})", op->getName(), op->dump(true)) << ", ";
+            //             }
+            //             std::println("    ({}), Operands: {}", inst->dump(), ss.str());
+            //         }
+            //     });
+            // });
         }
         auto asmStr = asmModule->dump();
         std::ofstream out(fmt::format("{}.s", outputName));
